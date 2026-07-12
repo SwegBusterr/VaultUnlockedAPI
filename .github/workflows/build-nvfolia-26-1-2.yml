@@ -58,12 +58,19 @@ jobs:
           sed -i 's/project(":purpur-api")/project(":divinemc-api")/g' divinemc-server/build.gradle.kts
           grep -n 'implementation(project' divinemc-server/build.gradle.kts | tee ../generated-dependencies.txt
 
-      - name: Build paperclip JAR
+      - name: Discover and build paperclip JAR
         working-directory: NVFolia
         shell: bash
         run: |
-          set -o pipefail
-          ./gradlew createMojmapPaperclipJar --stacktrace --no-daemon 2>&1 | tee ../build-jar.log
+          set -euxo pipefail
+          ./gradlew :divinemc-server:tasks --all --no-daemon 2>&1 | tee ../server-tasks.log
+          task=$(grep -E '^create[A-Za-z0-9]*PaperclipJar\b' ../server-tasks.log | awk '{print $1}' | head -n1 || true)
+          if [ -z "$task" ]; then
+            task=$(grep -E '^create[A-Za-z0-9]*Paperclip\b' ../server-tasks.log | awk '{print $1}' | head -n1 || true)
+          fi
+          test -n "$task"
+          echo "$task" | tee ../selected-paperclip-task.txt
+          ./gradlew ":divinemc-server:$task" --stacktrace --no-daemon 2>&1 | tee ../build-jar.log
 
       - name: Collect and scan artifacts
         if: always()
@@ -79,7 +86,7 @@ jobs:
               strings "$jar" | grep -Eai 'discord(app)?\.com/api/webhooks|pastebin|ngrok|Runtime\.getRuntime|ProcessBuilder|/bin/(ba)?sh|powershell|cmd\.exe' > "output/$(basename "$jar").suspicious-strings.txt" || true
             done
           fi
-          cp -f NVFOLIA_SOURCE_COMMIT.txt apply-patches.log build-jar.log generated-dependencies.txt output/ 2>/dev/null || true
+          cp -f NVFOLIA_SOURCE_COMMIT.txt apply-patches.log build-jar.log generated-dependencies.txt server-tasks.log selected-paperclip-task.txt output/ 2>/dev/null || true
 
       - name: Upload build result
         if: always()
