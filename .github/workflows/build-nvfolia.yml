@@ -38,6 +38,8 @@ jobs:
         run: |
           set -euxo pipefail
           chmod +x gradlew
+          git config --global user.name 'NVFolia Build Bot'
+          git config --global user.email 'nvfolia-build@users.noreply.github.com'
           git rev-parse HEAD | tee ../NVFOLIA_SOURCE_COMMIT.txt
 
           while IFS= read -r file; do
