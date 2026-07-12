@@ -38,39 +38,44 @@ jobs:
           ./gradlew applyAllPatches --stacktrace --no-daemon > ../apply.log 2>&1 || true
           test -s divinemc-api/build.gradle.kts
           test -s divinemc-server/build.gradle.kts
-      - name: Repair source sets
+      - name: Repair generated configuration
         working-directory: NVFolia
         run: |
           sed -i 's/project(":purpur-api")/project(":divinemc-api")/g' divinemc-server/build.gradle.kts
-          cat >> divinemc-api/build.gradle.kts <<'EOF'
+          python3 - <<'PY'
+          from pathlib import Path
 
-          sourceSets {
-              main {
-                  java.srcDir("../purpur-api/src/main/java")
-                  resources.srcDir("../purpur-api/src/main/resources")
-              }
-          }
-          EOF
-          cat >> divinemc-server/build.gradle.kts <<'EOF'
+          root = Path('.')
+          craft = list(root.rglob('org/bukkit/craftbukkit/Main.java'))
+          if not craft:
+              raise SystemExit('CraftBukkit Main.java was not generated')
 
-          sourceSets {
-              main {
-                  java.srcDir("../paper-server/src/main/java")
-                  java.srcDir("../paper-server/src/generated/java")
-                  java.srcDir("../purpur-server/src/main/java")
-                  resources.srcDir("../paper-server/src/main/resources")
-                  resources.srcDir("../purpur-server/src/main/resources")
-              }
-              test {
-                  java.srcDir("../paper-server/src/test/java")
-                  java.srcDir("../purpur-server/src/test/java")
-                  resources.srcDir("../paper-server/src/test/resources")
-                  resources.srcDir("../purpur-server/src/test/resources")
-              }
-          }
-          EOF
-          find paper-server purpur-server -type f -name '*.java' | wc -l > ../server-source-count.txt
-          test "$(cat ../server-source-count.txt)" -gt 100
+          def source_root(path: Path) -> Path:
+              marker = Path('org/bukkit/craftbukkit/Main.java')
+              return path.parent.parent.parent.parent
+
+          server_roots = sorted({source_root(p).resolve() for p in craft})
+          api_roots = sorted({p.parent.parent.parent.parent.resolve() for p in root.rglob('org/bukkit/Bukkit.java')})
+
+          with open('../discovered-source-roots.txt', 'w') as out:
+              for p in server_roots:
+                  out.write(f'SERVER {p}\n')
+              for p in api_roots:
+                  out.write(f'API {p}\n')
+
+          with open('divinemc-server/build.gradle.kts', 'a') as f:
+              f.write('\nsourceSets {\n    main {\n')
+              for p in server_roots:
+                  f.write(f'        java.srcDir("{p.as_posix()}")\n')
+              f.write('    }\n}\n')
+
+          with open('divinemc-api/build.gradle.kts', 'a') as f:
+              f.write('\nsourceSets {\n    main {\n')
+              for p in api_roots:
+                  f.write(f'        java.srcDir("{p.as_posix()}")\n')
+              f.write('    }\n}\n')
+          PY
+          cat ../discovered-source-roots.txt
       - name: Build
         working-directory: NVFolia
         run: |
@@ -87,13 +92,14 @@ jobs:
           test -n "$jar"
           cp "$jar" ../output/NVFolia-26.1.2.jar
           unzip -t ../output/NVFolia-26.1.2.jar
+          rm -rf cache
           java -Dpaperclip.patchonly=true -jar ../output/NVFolia-26.1.2.jar
           runtime=$(find cache -type f -name '*.jar' -size +1M | head -n1)
           test -n "$runtime"
           unzip -l "$runtime" | grep -q 'org/bukkit/craftbukkit/Main.class'
           sha256sum ../output/NVFolia-26.1.2.jar > ../output/SHA256SUMS.txt
           strings ../output/NVFolia-26.1.2.jar | grep -Eai 'discord(app)?\.com/api/webhooks|pastebin|ngrok|Runtime\.getRuntime|ProcessBuilder|/bin/(ba)?sh|powershell|cmd\.exe' > ../output/suspicious-strings.txt || true
-          cp ../SOURCE_COMMIT.txt ../server-source-count.txt ../selected-task.txt ../build.log ../output/
+          cp ../SOURCE_COMMIT.txt ../discovered-source-roots.txt ../selected-task.txt ../build.log ../output/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
