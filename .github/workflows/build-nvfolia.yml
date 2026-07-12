@@ -1,9 +1,9 @@
 name: Build NVFolia 26.2
 
 on:
-  push:
+  pull_request:
     branches:
-      - nvfolia-build-26-2
+      - master
   workflow_dispatch:
 
 permissions:
@@ -38,24 +38,16 @@ jobs:
         run: |
           set -euxo pipefail
           chmod +x gradlew
-
-          # Record the exact source revision.
           git rev-parse HEAD | tee ../NVFOLIA_SOURCE_COMMIT.txt
 
-          # Remove committed files that contain only GitHub's 429 error page.
           while IFS= read -r file; do
             echo "Removing corrupted patch: $file"
             rm -f "$file"
           done < <(grep -rl --include='*.patch' '^429: Too Many Requests' . || true)
 
-          # Correct incomplete NVFolia/DivineMC variable renames in settings.
           sed -i 's/divinemcBuildNumber/nvfoliaBuildNumber/g; s/divinemcChannel/nvfoliaChannel/g' settings.gradle.kts
-
-          # Keep generated module names aligned with settings.gradle.kts.
           sed -i 's/divinemc-api/nvfolia-api/g; s/divinemc-server/nvfolia-server/g' build.gradle.kts
 
-          # The checked-in version fetcher has a public class/package that does
-          # not match its filename/path. Move it to the declared Java path.
           src='nvfolia-server/src/main/java/org/deivaxxx/nvfolia/NVFoliaVersionFetcher.java'
           if [ -f "$src" ] && grep -q 'public class DivineVersionFetcher' "$src"; then
             mkdir -p nvfolia-server/src/main/java/org/bxteam/divinemc
