@@ -13,9 +13,91 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - name: Checkout helper branch
-        uses: actions/checkout@v4
-
-      - name: Checkout NVFolia source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
+          repository: deivaxxx/NVFolia
+          ref: NVFolia/26.1.2
+          path: NVFolia
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Configure
+        working-directory: NVFolia
+        run: |
+          chmod +x gradlew
+          git config --global user.email actions@users.noreply.github.com
+          git config --global user.name 'GitHub Actions'
+          mkdir -p divinemc-api divinemc-server
+          git rev-parse HEAD > ../SOURCE_COMMIT.txt
+      - name: Generate projects
+        working-directory: NVFolia
+        run: |
+          ./gradlew applyAllPatches --stacktrace --no-daemon > ../apply.log 2>&1 || true
+          test -s divinemc-api/build.gradle.kts
+          test -s divinemc-server/build.gradle.kts
+      - name: Repair source sets
+        working-directory: NVFolia
+        run: |
+          sed -i 's/project(":purpur-api")/project(":divinemc-api")/g' divinemc-server/build.gradle.kts
+          cat >> divinemc-api/build.gradle.kts <<'EOF'
+
+          sourceSets {
+              main {
+                  java.srcDir("../purpur-api/src/main/java")
+                  resources.srcDir("../purpur-api/src/main/resources")
+              }
+          }
+          EOF
+          cat >> divinemc-server/build.gradle.kts <<'EOF'
+
+          sourceSets {
+              main {
+                  java.srcDir("../paper-server/src/main/java")
+                  java.srcDir("../paper-server/src/generated/java")
+                  java.srcDir("../purpur-server/src/main/java")
+                  resources.srcDir("../paper-server/src/main/resources")
+                  resources.srcDir("../purpur-server/src/main/resources")
+              }
+              test {
+                  java.srcDir("../paper-server/src/test/java")
+                  java.srcDir("../purpur-server/src/test/java")
+                  resources.srcDir("../paper-server/src/test/resources")
+                  resources.srcDir("../purpur-server/src/test/resources")
+              }
+          }
+          EOF
+          find paper-server purpur-server -type f -name '*.java' | wc -l > ../server-source-count.txt
+          test "$(cat ../server-source-count.txt)" -gt 100
+      - name: Build
+        working-directory: NVFolia
+        run: |
+          ./gradlew :divinemc-server:tasks --all --no-daemon > ../tasks.log 2>&1
+          task=$(grep -E '^create[A-Za-z0-9]*PaperclipJar\b' ../tasks.log | awk '{print $1}' | head -n1)
+          test -n "$task"
+          echo "$task" > ../selected-task.txt
+          ./gradlew ":divinemc-server:$task" --stacktrace --no-daemon > ../build.log 2>&1
+      - name: Validate runtime
+        working-directory: NVFolia
+        run: |
+          mkdir -p ../output
+          jar=$(find divinemc-server/build/libs -type f -name '*paperclip*.jar' | head -n1)
+          test -n "$jar"
+          cp "$jar" ../output/NVFolia-26.1.2.jar
+          unzip -t ../output/NVFolia-26.1.2.jar
+          java -Dpaperclip.patchonly=true -jar ../output/NVFolia-26.1.2.jar
+          runtime=$(find cache -type f -name '*.jar' -size +1M | head -n1)
+          test -n "$runtime"
+          unzip -l "$runtime" | grep -q 'org/bukkit/craftbukkit/Main.class'
+          sha256sum ../output/NVFolia-26.1.2.jar > ../output/SHA256SUMS.txt
+          strings ../output/NVFolia-26.1.2.jar | grep -Eai 'discord(app)?\.com/api/webhooks|pastebin|ngrok|Runtime\.getRuntime|ProcessBuilder|/bin/(ba)?sh|powershell|cmd\.exe' > ../output/suspicious-strings.txt || true
+          cp ../SOURCE_COMMIT.txt ../server-source-count.txt ../selected-task.txt ../build.log ../output/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NVFolia-26.1.2-runtime-validated
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
