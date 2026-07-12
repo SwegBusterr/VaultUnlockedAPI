@@ -38,6 +38,7 @@ jobs:
           chmod +x gradlew
           git config user.email 'actions@users.noreply.github.com'
           git config user.name 'GitHub Actions'
+          mkdir -p divinemc-api divinemc-server
           git rev-parse HEAD | tee ../NVFOLIA_SOURCE_COMMIT.txt
 
       - name: Apply patches
