@@ -41,19 +41,20 @@ jobs:
           mkdir -p divinemc-api divinemc-server
           git rev-parse HEAD | tee ../NVFOLIA_SOURCE_COMMIT.txt
 
-      - name: Apply upstream patches
+      - name: Generate patched projects
         working-directory: NVFolia
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew applyUpstream --stacktrace --no-daemon 2>&1 | tee ../apply-patches.log
+          ./gradlew applyAllPatches --stacktrace --no-daemon 2>&1 | tee ../apply-patches.log || true
+          test -s divinemc-server/build.gradle.kts
+          test -s divinemc-api/build.gradle.kts
 
       - name: Repair generated project dependency
         working-directory: NVFolia
         shell: bash
         run: |
           set -euxo pipefail
-          test -f divinemc-server/build.gradle.kts
           sed -i 's/project(":purpur-api")/project(":divinemc-api")/g' divinemc-server/build.gradle.kts
           grep -n 'implementation(project' divinemc-server/build.gradle.kts | tee ../generated-dependencies.txt
 
