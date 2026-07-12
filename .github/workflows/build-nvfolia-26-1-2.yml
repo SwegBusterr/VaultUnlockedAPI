@@ -50,13 +50,24 @@ jobs:
           test -s divinemc-server/build.gradle.kts
           test -s divinemc-api/build.gradle.kts
 
-      - name: Repair generated project dependency
+      - name: Repair generated project configuration
         working-directory: NVFolia
         shell: bash
         run: |
           set -euxo pipefail
           sed -i 's/project(":purpur-api")/project(":divinemc-api")/g' divinemc-server/build.gradle.kts
+          cat >> divinemc-api/build.gradle.kts <<'EOF'
+
+          // Build repair: include generated Purpur API sources referenced by Paper API patches.
+          sourceSets {
+              main {
+                  java.srcDir("../purpur-api/src/main/java")
+                  resources.srcDir("../purpur-api/src/main/resources")
+              }
+          }
+          EOF
           grep -n 'implementation(project' divinemc-server/build.gradle.kts | tee ../generated-dependencies.txt
+          tail -n 12 divinemc-api/build.gradle.kts | tee ../generated-api-sources.txt
 
       - name: Discover and build paperclip JAR
         working-directory: NVFolia
@@ -86,7 +97,7 @@ jobs:
               strings "$jar" | grep -Eai 'discord(app)?\.com/api/webhooks|pastebin|ngrok|Runtime\.getRuntime|ProcessBuilder|/bin/(ba)?sh|powershell|cmd\.exe' > "output/$(basename "$jar").suspicious-strings.txt" || true
             done
           fi
-          cp -f NVFOLIA_SOURCE_COMMIT.txt apply-patches.log build-jar.log generated-dependencies.txt server-tasks.log selected-paperclip-task.txt output/ 2>/dev/null || true
+          cp -f NVFOLIA_SOURCE_COMMIT.txt apply-patches.log build-jar.log generated-dependencies.txt generated-api-sources.txt server-tasks.log selected-paperclip-task.txt output/ 2>/dev/null || true
 
       - name: Upload build result
         if: always()
