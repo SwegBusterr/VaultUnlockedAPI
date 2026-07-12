@@ -1,0 +1,80 @@
+name: Build NVFolia 26.1.2
+
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+
+      - name: Checkout NVFolia source
+        uses: actions/checkout@v4
+        with:
+          repository: deivaxxx/NVFolia
+          ref: NVFolia/26.1.2
+          path: NVFolia
+          fetch-depth: 0
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Configure build
+        working-directory: NVFolia
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          git config user.email 'actions@users.noreply.github.com'
+          git config user.name 'GitHub Actions'
+          git rev-parse HEAD | tee ../NVFOLIA_SOURCE_COMMIT.txt
+
+      - name: Apply patches
+        working-directory: NVFolia
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew applyAllPatches --stacktrace --no-daemon 2>&1 | tee ../apply-patches.log
+
+      - name: Build paperclip JAR
+        working-directory: NVFolia
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew createMojmapPaperclipJar --stacktrace --no-daemon 2>&1 | tee ../build-jar.log
+
+      - name: Collect and scan artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p output
+          find NVFolia -type f -path '*/build/libs/*.jar' -print -exec cp -v {} output/ \; || true
+          if compgen -G 'output/*.jar' > /dev/null; then
+            sha256sum output/*.jar | tee output/SHA256SUMS.txt
+            for jar in output/*.jar; do
+              unzip -l "$jar" > "output/$(basename "$jar").contents.txt"
+              strings "$jar" | grep -Eai 'discord(app)?\.com/api/webhooks|pastebin|ngrok|Runtime\.getRuntime|ProcessBuilder|/bin/(ba)?sh|powershell|cmd\.exe' > "output/$(basename "$jar").suspicious-strings.txt" || true
+            done
+          fi
+          cp -f NVFOLIA_SOURCE_COMMIT.txt apply-patches.log build-jar.log output/ 2>/dev/null || true
+
+      - name: Upload build result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NVFolia-26.1.2-build
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
