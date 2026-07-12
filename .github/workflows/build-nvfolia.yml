@@ -58,12 +58,32 @@ jobs:
 
           git diff -- . ':!*.png' | tee ../NVFOLIA_BUILD_REPAIRS.diff
 
-      - name: Build NVFolia paperclip JAR
+      - name: Apply patches
+        id: patches
+        continue-on-error: true
         working-directory: NVFolia
         shell: bash
         run: |
           set -o pipefail
           ./gradlew applyAllPatches --stacktrace --no-daemon 2>&1 | tee ../apply-patches.log
+
+      - name: Collect patch diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p output/patch-diagnostics
+          find NVFolia -type f \( -name 'build.gradle.kts' -o -name '*.rej' -o -name '*.patch' \) \
+            -path '*purpur*' -print0 | tar --null -T - -czf output/patch-diagnostics/purpur-build-files.tar.gz || true
+          find NVFolia -type f -name '*.rej' -print -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \; \
+            | tee output/patch-diagnostics/rejects.txt || true
+
+      - name: Build NVFolia paperclip JAR
+        if: steps.patches.outcome == 'success'
+        working-directory: NVFolia
+        shell: bash
+        run: |
+          set -o pipefail
           ./gradlew createMojmapPaperclipJar --stacktrace --no-daemon 2>&1 | tee ../build-jar.log
 
       - name: Collect JAR and checksums
