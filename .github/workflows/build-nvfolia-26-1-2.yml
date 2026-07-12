@@ -41,12 +41,21 @@ jobs:
           mkdir -p divinemc-api divinemc-server
           git rev-parse HEAD | tee ../NVFOLIA_SOURCE_COMMIT.txt
 
-      - name: Apply patches
+      - name: Apply upstream patches
         working-directory: NVFolia
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew applyAllPatches --stacktrace --no-daemon 2>&1 | tee ../apply-patches.log
+          ./gradlew applyUpstream --stacktrace --no-daemon 2>&1 | tee ../apply-patches.log
+
+      - name: Repair generated project dependency
+        working-directory: NVFolia
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f divinemc-server/build.gradle.kts
+          sed -i 's/project(":purpur-api")/project(":divinemc-api")/g' divinemc-server/build.gradle.kts
+          grep -n 'implementation(project' divinemc-server/build.gradle.kts | tee ../generated-dependencies.txt
 
       - name: Build paperclip JAR
         working-directory: NVFolia
@@ -69,7 +78,7 @@ jobs:
               strings "$jar" | grep -Eai 'discord(app)?\.com/api/webhooks|pastebin|ngrok|Runtime\.getRuntime|ProcessBuilder|/bin/(ba)?sh|powershell|cmd\.exe' > "output/$(basename "$jar").suspicious-strings.txt" || true
             done
           fi
-          cp -f NVFOLIA_SOURCE_COMMIT.txt apply-patches.log build-jar.log output/ 2>/dev/null || true
+          cp -f NVFOLIA_SOURCE_COMMIT.txt apply-patches.log build-jar.log generated-dependencies.txt output/ 2>/dev/null || true
 
       - name: Upload build result
         if: always()
